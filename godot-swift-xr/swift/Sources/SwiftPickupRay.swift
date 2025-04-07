@@ -6,46 +6,103 @@ class SwiftPickupRay: Node3D, @unchecked Sendable {
     getParent() as? XRController3D
   }
 
-  var length = Float(10.0)
-  var lineMesh: MeshInstance3D?
+  var rayMaxLength = 5.0
+  var rayWidth = 0.005
 
+  var lineNode: MeshInstance3D?
   var lastBasis: Basis?
   var lastPosition: Vector3?
 
+  @Export
+  var expansion: Double = 1.0
+  var expansionTween: Tween?
+
   override func _ready() {
-    let mesh = createLineMesh()
-    lineMesh = mesh
-    addChild(node: mesh)
+    setupSignals()
+    addLineNode()
   }
 
   override func _process(delta: Double) {
-    guard let basis = controller?.globalTransform.basis,
-      let position = controller?.globalPosition,
-      basis != lastBasis || position != lastPosition
-    else { return }
-
-    lastBasis = basis
-    lastPosition = position
-
+    guard checkLineChanged() else { return }
     let (origin, target) = resolveLineEnds()
     drawLine(from: origin, to: target)
   }
 
-  func createLineMesh() -> MeshInstance3D {
-    let mesh = MeshInstance3D()
-    mesh.mesh = ImmediateMesh()
-    mesh.castShadow = .off
-    return mesh
+  func setupSignals() {
+    guard let controller = controller else { return }
+    controller.buttonPressed.connect { button in
+      if button == "trigger_click" {
+        self.addLineNode()
+        self.animateExpansion()
+      }
+    }
+    controller.buttonReleased.connect { button in
+      if button == "trigger_click" {
+        self.removeLineNode()
+      }
+    }
+  }
+
+  func animateExpansion() {
+    expansion = 0.0
+    expansionTween?.kill()
+    expansionTween = createTween()
+    expansionTween?
+      .tweenProperty(object: self, property: "expansion", finalVal: Variant(1), duration: 0.1)?
+      .setEase(.in)?.setTrans(.circ)
+  }
+
+  func addLineNode() {
+    let node = createLineNode()
+    lineNode = node
+    addChild(node: node)
+  }
+
+  func createLineNode() -> MeshInstance3D {
+    let material = StandardMaterial3D()
+    material.albedoColor = .firebrick
+
+    let mesh = CylinderMesh()
+    mesh.material = material
+    mesh.topRadius = rayWidth
+    mesh.bottomRadius = rayWidth
+    mesh.height = 0.0
+
+    let node = MeshInstance3D()
+    node.mesh = mesh
+    node.castShadow = .off
+
+    return node
+  }
+
+  func removeLineNode() {
+    lineNode?.queueFree()
+    lineNode = nil
+    lastBasis = nil
+    lastPosition = nil
+  }
+
+  func checkLineChanged() -> Bool {
+    guard let controller = controller else { return false }
+
+    let basis = controller.globalTransform.basis
+    let position = controller.globalPosition
+    let changed = basis != lastBasis || position != lastPosition
+
+    lastBasis = basis
+    lastPosition = position
+    return changed
   }
 
   func resolveLineEnds() -> (Vector3, Vector3) {
-    let origin = Vector3(x: 0, y: 0, z: -0.05)
-    let maxTarget = Vector3(x: 0, y: 0, z: -length)
+    let origin = Vector3.zero
+    let maxTarget = Vector3(z: -Float(rayMaxLength))
     let hitTarget = castLine(
       from: toGlobal(localPoint: origin),
       to: toGlobal(localPoint: maxTarget)
     )
-    let target = hitTarget.flatMap(toLocal) ?? maxTarget
+    let expandedTarget = hitTarget.flatMap(toLocal) ?? maxTarget
+    let target = origin + (expandedTarget - origin) * expansion
     return (origin, target)
   }
 
@@ -62,16 +119,11 @@ class SwiftPickupRay: Node3D, @unchecked Sendable {
   }
 
   func drawLine(from origin: Vector3, to target: Vector3) {
-    guard let immediateMesh = lineMesh?.mesh as? ImmediateMesh else { return }
+    guard let node = lineNode, let mesh = node.mesh as? CylinderMesh
+    else { return }
 
-    let material = ORMMaterial3D()
-    material.shadingMode = .unshaded
-    material.albedoColor = .orange
-
-    immediateMesh.clearSurfaces()
-    immediateMesh.surfaceBegin(primitive: .lines, material: material)
-    immediateMesh.surfaceAddVertex(origin)
-    immediateMesh.surfaceAddVertex(target)
-    immediateMesh.surfaceEnd()
+    mesh.height = (target - origin).length()
+    node.position = origin + Vector3(z: -Float(mesh.height) / 2)
+    node.rotation = Vector3(x: .pi / 2)
   }
 }
