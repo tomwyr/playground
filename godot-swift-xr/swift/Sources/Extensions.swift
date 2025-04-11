@@ -10,11 +10,28 @@ extension Vector3 {
 }
 
 extension Node {
-  func getNodeOrNull<T>(_ path: NodePath) -> T? where T: Node {
-    getNodeOrNull(path: path) as? T
+  func getNode<T>(_ path: NodePath) -> T where T: Node {
+    getNode(path: path) as! T
   }
 
-  func getParent<T>() -> T? where T: Node {
-    getParent() as? T
+  func getNodeOrNull<T>(_ path: NodePath) -> T? where T: Node {
+    getNodeOrNull(path: path) as! T?
+  }
+
+  func getParent<T>() -> T where T: Node {
+    getParent() as! T
+  }
+}
+
+extension Callable {
+  convenience init<T>(_ callback: @escaping (T) -> Void) where T: VariantStorable {
+    self.init({ args in
+      guard args.count == 1, let variant = args.first as? Variant, let arg = T(variant) else {
+        GD.print("Unexpected callable arguments (expected \(T.self))")
+        return nil
+      }
+      callback(arg)
+      return nil
+    })
   }
 }
